@@ -74,6 +74,15 @@
   }
   .trakt-links a:hover{ border-color:var(--blue-bright); background:var(--ink-3); }
   .trakt-hint{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--paper-dim); margin-top:8px; line-height:1.5; }
+  .device-box{
+    background:var(--ink); border:1.5px dashed var(--line); border-radius:6px; padding:14px 16px; margin-top:6px;
+  }
+  .device-code{
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:24px; letter-spacing:0.1em; color:var(--claret);
+    margin:8px 0;
+  }
+  .device-status{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--paper-dim); }
+  .trakt-connected-pill{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-glow); display:flex; align-items:center; gap:8px; }
 
   .controls{ max-width:1160px; margin:0 auto; padding:0 24px 8px; opacity:0.35; pointer-events:none; transition:opacity 0.2s; }
   .controls.active{ opacity:1; pointer-events:auto; }
@@ -198,6 +207,11 @@
   .cast-item{ flex-shrink:0; width:74px; text-align:center; }
   .cast-item img{ width:74px; height:74px; object-fit:cover; border-radius:50%; background:var(--ink-3); display:block; margin-bottom:5px; }
   .cast-item .name{ font-size:10.5px; color:var(--paper); line-height:1.2; }
+  .trakt-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+  .trakt-actions select{
+    background:var(--ink-2); border:1.5px solid var(--line); color:var(--paper); font-family:'JetBrains Mono',monospace;
+    font-size:12px; padding:6px 8px; border-radius:3px; outline:none;
+  }
 
   footer{ text-align:center; padding:20px; color:#5a3a48; font-weight:600; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; }
 </style>
@@ -210,6 +224,7 @@
   <div class="brand">WARDWRIGHT <span>TV</span></div>
   <div class="top-actions">
     <button class="btn small" id="watchToggleBtn">To Watch (0)</button>
+    <button class="btn small" id="watchedToggleBtn">Watched (0)</button>
     <button class="btn small" id="traktToggleBtn">Trakt links</button>
   </div>
 </div>
@@ -228,13 +243,20 @@
 
 <div class="trakt-panel" id="traktPanel">
   <div class="trakt-inner">
-    <h3>Your Trakt lists</h3>
+    <h3>Your Trakt account</h3>
+    <div class="trakt-row" id="traktConnectRow">
+      <button class="btn small" id="traktConnectBtn">Connect Trakt account</button>
+    </div>
+    <div id="traktDeviceBox" style="display:none;"></div>
+    <div class="trakt-hint" id="traktConnectHint">Connecting lets you add titles straight to your real Watchlist or lists from inside this app.</div>
+
+    <h3 style="margin-top:20px;">Your Trakt lists</h3>
     <div class="trakt-row">
       <input type="text" id="traktUsername" placeholder="Your Trakt username…" autocomplete="off">
       <button class="btn small" id="traktSaveBtn">Save</button>
     </div>
     <div class="trakt-links" id="traktLinks"></div>
-    <div class="trakt-hint">These open your actual Trakt profile in a new tab — this tool doesn't pull your Trakt data in, it just gives you quick jumps to it.</div>
+    <div class="trakt-hint">These open your actual Trakt profile in a new tab.</div>
   </div>
 </div>
 
@@ -290,6 +312,14 @@
 
 <script>
 const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+const TRAKT_CLIENT_ID = "ooUoRJGcyZMSiwW5h3blYM02h30GTyusv1ZwAcBZgLc";
+const TRAKT_CLIENT_SECRET = "1sm_skWsun3OZZvCncmsrb5sV4wYgUmIAgGsWU1M4WA";
+const TRAKT_REDIRECT = "urn:ietf:wg:oauth:2.0:oob";
+let traktAccessToken = null;
+let traktRefreshToken = null;
+let traktTokenExpiry = 0;
+let traktLists = [];
+let traktPollTimer = null;
 const PROFILE_BASE = "https://image.tmdb.org/t/p/w185";
 let apiKey = null;
 let mediaType = 'movie';
@@ -307,6 +337,158 @@ async function storageGet(key){
 }
 async function storageSet(key, value){
   try{ localStorage.setItem(key, value); }catch(e){ /* ignore — private browsing etc. */ }
+}
+
+// ---- Trakt OAuth device flow ----
+async function traktLoadSavedAuth(){
+  const saved = await storageGet('wardwright:trakt-auth');
+  if(!saved) return;
+  try{
+    const auth = JSON.parse(saved);
+    traktAccessToken = auth.access_token;
+    traktRefreshToken = auth.refresh_token;
+    traktTokenExpiry = auth.expiry;
+    traktSetConnectedUI();
+  }catch(e){ /* ignore corrupt data */ }
+}
+
+async function traktSaveAuth(tokenData){
+  traktAccessToken = tokenData.access_token;
+  traktRefreshToken = tokenData.refresh_token;
+  traktTokenExpiry = Date.now() + (tokenData.expires_in * 1000);
+  await storageSet('wardwright:trakt-auth', JSON.stringify({
+    access_token: traktAccessToken, refresh_token: traktRefreshToken, expiry: traktTokenExpiry
+  }));
+}
+
+function traktSetConnectedUI(){
+  document.getElementById('traktConnectRow').innerHTML = `
+    <div class="trakt-connected-pill"><span class="dotlive"></span> Trakt account connected</div>
+    <button class="btn small claret" id="traktDisconnectBtn">Disconnect</button>`;
+  document.getElementById('traktDeviceBox').style.display = 'none';
+  document.getElementById('traktConnectHint').textContent = 'You can now add titles straight to your Watchlist or lists from any poster\'s detail panel.';
+  document.getElementById('traktDisconnectBtn').addEventListener('click', traktDisconnect);
+  traktLoadLists();
+}
+
+async function traktDisconnect(){
+  traktAccessToken = null; traktRefreshToken = null; traktTokenExpiry = 0; traktLists = [];
+  await storageSet('wardwright:trakt-auth', '');
+  document.getElementById('traktConnectRow').innerHTML = `<button class="btn small" id="traktConnectBtn">Connect Trakt account</button>`;
+  document.getElementById('traktConnectHint').textContent = 'Connecting lets you add titles straight to your real Watchlist or lists from inside this app.';
+  document.getElementById('traktConnectBtn').addEventListener('click', traktStartDeviceFlow);
+}
+
+async function traktStartDeviceFlow(){
+  const box = document.getElementById('traktDeviceBox');
+  box.style.display = 'block';
+  box.innerHTML = `<div class="device-status">Requesting a code…</div>`;
+  try{
+    const res = await fetch('https://api.trakt.tv/oauth/device/code', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ client_id: TRAKT_CLIENT_ID })
+    });
+    const data = await res.json();
+    box.innerHTML = `
+      <div class="device-status">Go to <strong>${data.verification_url}</strong> and enter this code:</div>
+      <div class="device-code">${data.user_code}</div>
+      <div class="device-status" id="devicePollStatus">Waiting for you to approve it…</div>`;
+    traktPollForToken(data.device_code, data.interval || 5, data.expires_in || 600);
+  }catch(e){
+    box.innerHTML = `<div class="device-status">Couldn't reach Trakt. Try again.</div>`;
+  }
+}
+
+function traktPollForToken(deviceCode, interval, expiresIn){
+  clearInterval(traktPollTimer);
+  const deadline = Date.now() + expiresIn * 1000;
+  traktPollTimer = setInterval(async ()=>{
+    if(Date.now() > deadline){
+      clearInterval(traktPollTimer);
+      const el = document.getElementById('devicePollStatus');
+      if(el) el.textContent = 'Code expired — click Connect to try again.';
+      return;
+    }
+    try{
+      const res = await fetch('https://api.trakt.tv/oauth/device/token', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          code: deviceCode, client_id: TRAKT_CLIENT_ID, client_secret: TRAKT_CLIENT_SECRET
+        })
+      });
+      if(res.status === 200){
+        const tokenData = await res.json();
+        clearInterval(traktPollTimer);
+        await traktSaveAuth(tokenData);
+        traktSetConnectedUI();
+      }
+      // 400 = still pending, keep polling; other codes fall through and just retry until expiry
+    }catch(e){ /* transient network issue — keep polling */ }
+  }, interval * 1000);
+}
+
+async function traktEnsureFreshToken(){
+  if(!traktAccessToken) return false;
+  if(Date.now() < traktTokenExpiry - 60000) return true;
+  if(!traktRefreshToken) return false;
+  try{
+    const res = await fetch('https://api.trakt.tv/oauth/token', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        refresh_token: traktRefreshToken, client_id: TRAKT_CLIENT_ID, client_secret: TRAKT_CLIENT_SECRET,
+        redirect_uri: TRAKT_REDIRECT, grant_type: 'refresh_token'
+      })
+    });
+    if(!res.ok) return false;
+    const tokenData = await res.json();
+    await traktSaveAuth(tokenData);
+    return true;
+  }catch(e){ return false; }
+}
+
+function traktHeaders(){
+  return {
+    'Content-Type': 'application/json',
+    'trakt-api-version': '2',
+    'trakt-api-key': TRAKT_CLIENT_ID,
+    'Authorization': `Bearer ${traktAccessToken}`
+  };
+}
+
+async function traktLoadLists(){
+  const ok = await traktEnsureFreshToken();
+  if(!ok) return;
+  try{
+    const res = await fetch('https://api.trakt.tv/users/me/lists', { headers: traktHeaders() });
+    traktLists = await res.json();
+  }catch(e){ traktLists = []; }
+}
+
+function traktItemBody(id, type){
+  const key = type === 'movie' ? 'movies' : 'shows';
+  return { [key]: [ { ids: { tmdb: id } } ] };
+}
+
+async function traktAddToWatchlist(id, type){
+  const ok = await traktEnsureFreshToken();
+  if(!ok) return { success:false, message:'Not connected to Trakt.' };
+  try{
+    const res = await fetch('https://api.trakt.tv/sync/watchlist', {
+      method:'POST', headers: traktHeaders(), body: JSON.stringify(traktItemBody(id, type))
+    });
+    return res.ok ? { success:true } : { success:false, message:'Trakt rejected that — try again.' };
+  }catch(e){ return { success:false, message:'Network error reaching Trakt.' }; }
+}
+
+async function traktAddToList(listId, id, type){
+  const ok = await traktEnsureFreshToken();
+  if(!ok) return { success:false, message:'Not connected to Trakt.' };
+  try{
+    const res = await fetch(`https://api.trakt.tv/users/me/lists/${listId}/items`, {
+      method:'POST', headers: traktHeaders(), body: JSON.stringify(traktItemBody(id, type))
+    });
+    return res.ok ? { success:true } : { success:false, message:'Trakt rejected that — try again.' };
+  }catch(e){ return { success:false, message:'Network error reaching Trakt.' }; }
 }
 
 document.getElementById('connectBtn').addEventListener('click', ()=>connect(document.getElementById('apiKeyInput').value.trim()));
@@ -340,6 +522,7 @@ async function connect(key){
     const savedWatched = await storageGet('wardwright:watched');
     if(savedWatched) watched = JSON.parse(savedWatched);
     updateWatchBtnLabel();
+    updateWatchedBtnLabel();
 
     document.getElementById('keycardInner').classList.add('connected');
     document.getElementById('keycardLabel').innerHTML = '';
@@ -367,27 +550,39 @@ async function connect(key){
 document.getElementById('traktToggleBtn').addEventListener('click', ()=>{
   document.getElementById('traktPanel').classList.toggle('open');
 });
+document.getElementById('traktConnectBtn').addEventListener('click', traktStartDeviceFlow);
+traktLoadSavedAuth();
 
 function updateWatchBtnLabel(){
   document.getElementById('watchToggleBtn').textContent = view === 'watchlist'
     ? 'Back to browse'
     : `To Watch (${watchlist.length})`;
 }
+function updateWatchedBtnLabel(){
+  document.getElementById('watchedToggleBtn').textContent = view === 'watched'
+    ? 'Back to browse'
+    : `Watched (${watched.length})`;
+}
 
-document.getElementById('watchToggleBtn').addEventListener('click', ()=>{
-  view = view === 'watchlist' ? 'browse' : 'watchlist';
+function setView(target){
+  view = (view === target) ? 'browse' : target;
   updateWatchBtnLabel();
-  if(view === 'watchlist'){
-    document.getElementById('controls').classList.remove('active');
-    document.getElementById('statusRow').style.display = 'none';
-    document.getElementById('loadMoreWrap').style.display = 'none';
-    renderWatchlistGrid();
-  }else{
+  updateWatchedBtnLabel();
+  if(view === 'browse'){
     document.getElementById('controls').classList.add('active');
     document.getElementById('statusRow').style.display = 'flex';
     renderResults();
+  }else{
+    document.getElementById('controls').classList.remove('active');
+    document.getElementById('statusRow').style.display = 'none';
+    document.getElementById('loadMoreWrap').style.display = 'none';
+    if(view === 'watchlist') renderWatchlistGrid();
+    else renderWatchedGrid();
   }
-});
+}
+
+document.getElementById('watchToggleBtn').addEventListener('click', ()=>setView('watchlist'));
+document.getElementById('watchedToggleBtn').addEventListener('click', ()=>setView('watched'));
 
 function isInWatchlist(id, type){
   return watchlist.some(w => w.id === id && w.mediaType === type);
@@ -397,19 +592,27 @@ function isWatched(id, type){
   return watched.some(w => w.id === id && w.mediaType === type);
 }
 
-async function toggleWatched(id, type){
+async function toggleWatched(item){
+  const { id, mediaType: type } = item;
   const idx = watched.findIndex(w => w.id === id && w.mediaType === type);
+  let nowWatched;
   if(idx >= 0){
     watched.splice(idx, 1);
+    nowWatched = false;
   }else{
-    watched.push({ id, mediaType: type });
+    watched.push(item);
+    nowWatched = true;
     // marking watched clears it off the "to watch" list automatically
     const wlIdx = watchlist.findIndex(w => w.id === id && w.mediaType === type);
-    if(wlIdx >= 0) watchlist.splice(wlIdx, 1);
-    await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
-    updateWatchBtnLabel();
+    if(wlIdx >= 0){
+      watchlist.splice(wlIdx, 1);
+      await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
+      updateWatchBtnLabel();
+    }
   }
   await storageSet('wardwright:watched', JSON.stringify(watched));
+  updateWatchedBtnLabel();
+  return nowWatched;
 }
 
 async function toggleWatch(item){
@@ -434,6 +637,23 @@ function renderWatchlistGrid(){
   }
   empty.style.display = 'none';
   watchlist.forEach(item=>{
+    grid.appendChild(buildCard(item));
+  });
+}
+
+function renderWatchedGrid(){
+  document.getElementById('loadingRow').style.display = 'none';
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('emptyState');
+  grid.innerHTML = '';
+  if(watched.length === 0){
+    empty.style.display = 'block';
+    empty.querySelector('.big').textContent = 'NOTHING MARKED YET';
+    empty.querySelector('div:last-child').textContent = 'Titles you mark "Watched" show up here — untick one to bring it back into search.';
+    return;
+  }
+  empty.style.display = 'none';
+  watched.forEach(item=>{
     grid.appendChild(buildCard(item));
   });
 }
@@ -636,9 +856,15 @@ function buildCard(m){
   });
   card.querySelector('.watched-btn').addEventListener('click', async (e)=>{
     e.stopPropagation();
-    await toggleWatched(id, type);
-    if(isWatched(id, type)){
-      // marked watched — pull it out of whatever grid is currently showing
+    const item = { id, mediaType: type, savedTitle: title, year, rating, poster_path: posterPath };
+    const nowWatched = await toggleWatched(item);
+    if(nowWatched){
+      // marked watched — pull it out of the DOM and out of the in-memory list,
+      // so it doesn't come back when "Load more" re-renders from currentResults
+      card.remove();
+      currentResults = currentResults.filter(r => !(r.id === id && (r.mediaType || mediaType) === type));
+    }else if(view === 'watched'){
+      // un-marked while browsing the Watched view — it no longer belongs here
       card.remove();
     }else{
       e.target.classList.remove('done');
@@ -698,6 +924,21 @@ async function openDetail(id, typeOverride){
       : (d.number_of_seasons ? `${d.number_of_seasons} season${d.number_of_seasons>1?'s':''}, ${d.number_of_episodes||'?'} eps` : '—');
     const cast = (d.credits && d.credits.cast) ? d.credits.cast.slice(0,8) : [];
 
+    const traktSectionHtml = traktAccessToken
+      ? `
+        <div class="modal-section-label">Trakt</div>
+        <div class="trakt-actions" id="traktActions">
+          <button class="btn small" id="traktAddWatchlistBtn">+ Trakt Watchlist</button>
+          ${traktLists.length ? `
+            <select id="traktListSelect">
+              ${traktLists.map(l=>`<option value="${l.ids.slug}">${l.name}</option>`).join('')}
+            </select>
+            <button class="btn small" id="traktAddListBtn">Add to list</button>
+          ` : ''}
+          <span class="device-status" id="traktActionStatus"></span>
+        </div>`
+      : `<div class="modal-section-label">Trakt</div><div class="trakt-hint">Connect your Trakt account (Trakt links panel, top right) to add this straight to your Watchlist or a list.</div>`;
+
     content.innerHTML = `
       <button class="modal-close" id="modalCloseBtn2">&times;</button>
       <div class="modal-hero">
@@ -728,9 +969,31 @@ async function openDetail(id, typeOverride){
                 <div class="name">${c.name}</div>
               </div>`).join('')}
           </div>` : ''}
+        ${traktSectionHtml}
       </div>
     `;
     document.getElementById('modalCloseBtn2').addEventListener('click', closeDetail);
+
+    if(traktAccessToken){
+      const statusEl = document.getElementById('traktActionStatus');
+      const watchlistBtn = document.getElementById('traktAddWatchlistBtn');
+      if(watchlistBtn){
+        watchlistBtn.addEventListener('click', async ()=>{
+          statusEl.textContent = 'Adding…';
+          const result = await traktAddToWatchlist(id, detailType);
+          statusEl.textContent = result.success ? '✓ Added to Watchlist' : (result.message || 'Something went wrong.');
+        });
+      }
+      const listBtn = document.getElementById('traktAddListBtn');
+      if(listBtn){
+        listBtn.addEventListener('click', async ()=>{
+          const slug = document.getElementById('traktListSelect').value;
+          statusEl.textContent = 'Adding…';
+          const result = await traktAddToList(slug, id, detailType);
+          statusEl.textContent = result.success ? '✓ Added to list' : (result.message || 'Something went wrong.');
+        });
+      }
+    }
   }catch(err){
     content.innerHTML = `<button class="modal-close" id="modalCloseBtn3">&times;</button><div class="loading-row">Couldn't load details. Try again.</div>`;
     document.getElementById('modalCloseBtn3').addEventListener('click', closeDetail);
