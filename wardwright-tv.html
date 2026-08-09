@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wardwright TV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#eaf6fb; --ink-2:#d3ecf7; --ink-3:#b9e1f2;
+    --paper:#4a0620; --paper-dim:#6b3a4a;
+    --line:#8fb9d4;
+    --claret:#6b0f2e; --claret-bright:#9c1f45; --claret-glow:#a11a3f;
+    --blue:#1f3a7a; --blue-bright:#2a4d94; --blue-glow:#1f5aa8;
+    --on-accent:#fdf3f6;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--ink); color:var(--paper); font-family:'Inter',sans-serif; min-height:100vh; }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:5; opacity:0.04;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode:overlay;
+  }
+  .stripe{ height:5px; background:repeating-linear-gradient(90deg, var(--claret) 0 40px, var(--blue) 40px 80px); }
+
+  .topbar{
+    max-width:1160px; margin:0 auto; padding:18px 24px; display:flex; align-items:center;
+    justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  .brand{ font-family:'Bebas Neue',sans-serif; font-size:26px; letter-spacing:0.04em; }
+  .brand span{ color:var(--blue-glow); }
+  .top-actions{ display:flex; gap:8px; align-items:center; }
+  .btn{
+    font-family:'Inter',sans-serif; font-weight:700; font-size:13px; padding:8px 15px; border-radius:3px;
+    border:2px solid var(--blue-bright); background:transparent; color:var(--blue-bright); cursor:pointer;
+    white-space:nowrap; transition:all 0.15s ease;
+  }
+  .btn:hover{ background:var(--blue-bright); color:var(--on-accent); }
+  .btn.small{ padding:5px 11px; font-size:11.5px; }
+  .btn.claret{ border-color:var(--claret-bright); color:var(--claret-glow); }
+  .btn.claret:hover{ background:var(--claret-bright); color:var(--on-accent); }
+
+  .keycard{ max-width:1160px; margin:0 auto 20px; padding:0 24px; }
+  .keycard-inner{
+    background:var(--ink-2); border:1px solid var(--line); border-radius:6px;
+    padding:14px 18px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+  }
+  .keycard-inner.connected{ border-color:var(--blue-glow); }
+  .keycard-label{ font-family:'JetBrains Mono',monospace; font-weight:600; font-size:11.5px; color:var(--paper-dim); flex:1 1 220px; line-height:1.5; }
+  .keycard-label a{ color:var(--blue-glow); }
+  #apiKeyInput{
+    flex:1 1 240px; background:var(--ink); border:2px solid var(--line); color:var(--paper); font-weight:600;
+    font-family:'JetBrains Mono',monospace; font-size:13px; padding:9px 12px; border-radius:3px; outline:none;
+  }
+  #apiKeyInput:focus{ border-color:var(--blue-bright); }
+  .connected-pill{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-glow); display:flex; align-items:center; gap:8px; }
+  .dotlive{ width:8px;height:8px;border-radius:50%; background:var(--blue-glow); box-shadow:0 0 6px var(--blue-glow); }
+  .keyerror{ color:var(--claret-glow); font-family:'JetBrains Mono',monospace; font-size:12px; margin-top:8px; display:none; }
+
+  .trakt-panel{ max-width:1160px; margin:0 auto 20px; padding:0 24px; display:none; }
+  .trakt-panel.open{ display:block; }
+  .trakt-inner{ background:var(--ink-2); border:1px solid var(--line); border-radius:6px; padding:16px 18px; }
+  .trakt-inner h3{ margin:0 0 10px; font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:0.03em; color:var(--paper); }
+  .trakt-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .trakt-row input{
+    flex:1 1 200px; background:var(--ink); border:1px solid var(--line); color:var(--paper);
+    font-family:'JetBrains Mono',monospace; font-size:13px; padding:9px 12px; border-radius:3px; outline:none;
+  }
+  .trakt-links{ display:flex; gap:10px; flex-wrap:wrap; }
+  .trakt-links a{
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-glow); text-decoration:none;
+    border:1px solid var(--line); padding:7px 12px; border-radius:20px; transition:all 0.15s ease;
+  }
+  .trakt-links a:hover{ border-color:var(--blue-bright); background:var(--ink-3); }
+  .trakt-hint{ font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--paper-dim); margin-top:8px; line-height:1.5; }
+
+  .controls{ max-width:1160px; margin:0 auto; padding:0 24px 8px; opacity:0.35; pointer-events:none; transition:opacity 0.2s; }
+  .controls.active{ opacity:1; pointer-events:auto; }
+
+  .type-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .type-btn{
+    font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:0.05em; padding:7px 20px; border-radius:3px;
+    border:1.5px solid var(--line); background:var(--ink-2); color:var(--paper-dim); cursor:pointer; transition:all 0.15s ease;
+  }
+  .type-btn{ font-weight:700; }
+  .type-btn.active[data-type="movie"]{ background:var(--claret); border-color:var(--claret-bright); color:var(--on-accent); }
+  .type-btn.active[data-type="tv"]{ background:var(--blue); border-color:var(--blue-bright); color:var(--on-accent); }
+
+  .search-wrap{ position:relative; margin-bottom:14px; }
+  .search-wrap input{
+    width:100%; background:var(--ink-2); border:2px solid var(--line); color:var(--paper); font-weight:500;
+    font-family:'Inter',sans-serif; font-size:16px; padding:12px 16px 12px 40px; border-radius:3px; outline:none;
+  }
+  .search-wrap input:focus{ border-color:var(--blue-bright); }
+  .search-wrap input::placeholder{ color:#5a3a48; font-weight:500; }
+  .search-icon{ position:absolute; left:13px; top:50%; transform:translateY(-50%); color:var(--blue-glow); pointer-events:none; font-size:15px; }
+
+  .filter-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; align-items:flex-end; }
+  .field{ display:flex; flex-direction:column; gap:4px; }
+  .field label{ font-family:'JetBrains Mono',monospace; font-weight:600; font-size:10px; color:var(--paper-dim); letter-spacing:0.05em; text-transform:uppercase; }
+  .field input{
+    background:var(--ink-2); border:1px solid var(--line); color:var(--paper); font-family:'JetBrains Mono',monospace;
+    font-size:12.5px; padding:7px 9px; border-radius:3px; outline:none; width:90px;
+  }
+  .field.rating input{ width:70px; }
+
+  details.genre-panel{ margin-bottom:12px; }
+  details.genre-panel summary{
+    cursor:pointer; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--paper-dim);
+    letter-spacing:0.05em; text-transform:uppercase; padding:4px 0; list-style:none;
+  }
+  details.genre-panel summary::-webkit-details-marker{ display:none; }
+  details.genre-panel summary::before{ content:"▸ "; color:var(--blue-glow); }
+  details.genre-panel[open] summary::before{ content:"▾ "; }
+
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 18px; }
+  .chip{
+    font-family:'Inter',sans-serif; font-weight:600; font-size:13px; padding:7px 13px; border-radius:20px;
+    border:1.5px solid var(--line); background:transparent; color:var(--paper-dim); cursor:pointer; user-select:none;
+    transition:all 0.15s ease;
+  }
+  .chip:hover{ border-color:var(--blue-bright); color:var(--paper); }
+  .chip.include{ background:var(--blue); border-color:var(--blue-bright); color:#e6eeff; }
+  .chip.exclude{
+    background:var(--claret); border-color:var(--claret-bright); color:#ffe6ee;
+    text-decoration:line-through; text-decoration-thickness:2px;
+  }
+  .chip.permchip.active{ background:var(--claret-glow); border-color:var(--claret-glow); color:var(--ink); opacity:1; }
+
+  .status-row{
+    max-width:1160px; margin:0 auto; padding:0 24px 16px; display:flex; justify-content:space-between; align-items:baseline;
+    border-top:2px dashed var(--line); padding-top:12px; font-family:'JetBrains Mono',monospace; font-weight:600; font-size:11.5px; color:var(--paper-dim);
+    flex-wrap:wrap; gap:8px;
+  }
+  .status-row button{ background:none; border:none; color:var(--blue-glow); font-family:'JetBrains Mono',monospace; font-size:11.5px; cursor:pointer; text-decoration:underline; padding:0; }
+
+  .grid{ max-width:1160px; margin:0 auto; padding:8px 24px 20px; display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
+  .card{
+    background:var(--ink-2); border:1px solid #2a1622; border-radius:4px; overflow:hidden; cursor:pointer;
+    display:flex; flex-direction:column; transition:transform 0.15s ease, border-color 0.15s ease;
+  }
+  .card:hover{ transform:translateY(-3px); border-color:var(--blue-bright); }
+  .poster-wrap{ position:relative; }
+  .watch-btn{
+    position:absolute; top:6px; right:6px; z-index:2;
+    font-family:'Inter',sans-serif; font-weight:700; font-size:11px; padding:5px 9px; border-radius:14px;
+    border:1.5px solid var(--claret-bright); background:rgba(234,246,251,0.92); color:var(--claret-bright);
+    cursor:pointer; transition:all 0.15s ease;
+  }
+  .watch-btn.saved{ background:var(--claret-bright); color:var(--on-accent); }
+  .watch-btn:hover{ transform:scale(1.05); }
+  .watched-btn{
+    position:absolute; top:6px; left:6px; z-index:2;
+    font-family:'Inter',sans-serif; font-weight:700; font-size:11px; padding:5px 9px; border-radius:14px;
+    border:1.5px solid var(--blue-bright); background:rgba(234,246,251,0.92); color:var(--blue-bright);
+    cursor:pointer; transition:all 0.15s ease;
+  }
+  .watched-btn.done{ background:var(--blue-bright); color:var(--on-accent); }
+  .watched-btn:hover{ transform:scale(1.05); }
+  .poster-img{ width:100%; aspect-ratio:2/3; object-fit:cover; display:block; background:var(--ink-3); }
+  .poster-fallback{
+    width:100%; aspect-ratio:2/3; display:flex; align-items:center; justify-content:center; text-align:center; padding:10px;
+    font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:0.05em; color:rgba(255,255,255,0.85);
+    background:linear-gradient(160deg, var(--claret), var(--ink));
+  }
+  .card-body{ padding:9px 10px 10px; }
+  .card-title{ font-weight:700; font-size:12.5px; line-height:1.25; color:var(--paper); }
+  .card-meta{ font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--blue-glow); display:flex; justify-content:space-between; margin-top:4px; }
+
+  .loadmore-wrap{ display:flex; justify-content:center; padding:6px 24px 60px; }
+  .empty{ max-width:1160px; margin:40px auto; padding:0 24px; text-align:center; color:var(--paper-dim); }
+  .empty .big{ font-family:'Bebas Neue',sans-serif; font-size:32px; color:var(--blue-glow); margin-bottom:8px; }
+  .loading-row{ text-align:center; padding:40px 24px; color:var(--paper-dim); font-family:'JetBrains Mono',monospace; font-size:13px; }
+
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(10,5,8,0.85); z-index:100; display:none;
+    align-items:flex-start; justify-content:center; overflow-y:auto; padding:40px 16px;
+  }
+  .modal-backdrop.open{ display:flex; }
+  .modal{ background:var(--ink-2); border:1px solid var(--line); border-radius:8px; max-width:640px; width:100%; overflow:hidden; position:relative; }
+  .modal-close{
+    position:absolute; top:12px; right:12px; background:rgba(0,0,0,0.55); border:none; color:var(--on-accent);
+    width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:18px; z-index:2;
+  }
+  .modal-hero{ display:flex; gap:16px; padding:20px; background:linear-gradient(160deg, var(--claret-bright), var(--claret) 70%); color:var(--on-accent); }
+  .modal-poster{ width:120px; flex-shrink:0; border-radius:4px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.3); }
+  .modal-poster img{ width:100%; display:block; }
+  .modal-title{ font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:0.03em; line-height:1; margin-bottom:6px; color:var(--on-accent); }
+  .modal-tagline{ font-family:'JetBrains Mono',monospace; font-size:12px; color:#ffe3ec; font-style:italic; margin-bottom:10px; }
+  .modal-meta{ font-family:'JetBrains Mono',monospace; font-size:11.5px; font-weight:600; color:var(--on-accent); display:flex; gap:14px; flex-wrap:wrap; }
+  .modal-body{ padding:18px 20px 22px; }
+  .modal-section-label{ font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--blue-glow); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .modal-overview{ font-size:14px; line-height:1.6; color:var(--paper); margin-bottom:16px; }
+  .modal-genres{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+  .modal-genres .tag{ font-size:11px; padding:4px 9px; border-radius:12px; background:var(--ink-3); color:var(--paper-dim); border:1px solid var(--line); }
+  .modal-cast{ display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; }
+  .cast-item{ flex-shrink:0; width:74px; text-align:center; }
+  .cast-item img{ width:74px; height:74px; object-fit:cover; border-radius:50%; background:var(--ink-3); display:block; margin-bottom:5px; }
+  .cast-item .name{ font-size:10.5px; color:var(--paper); line-height:1.2; }
+
+  footer{ text-align:center; padding:20px; color:#5a3a48; font-weight:600; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; }
+</style>
+</head>
+<body>
+
+<div class="stripe"></div>
+
+<div class="topbar">
+  <div class="brand">WARDWRIGHT <span>TV</span></div>
+  <div class="top-actions">
+    <button class="btn small" id="watchToggleBtn">To Watch (0)</button>
+    <button class="btn small" id="traktToggleBtn">Trakt links</button>
+  </div>
+</div>
+
+<div class="keycard">
+  <div class="keycard-inner" id="keycardInner">
+    <div class="keycard-label" id="keycardLabel">
+      Paste your TMDb API key (v3 auth) to connect. It stays in this browser tab only — never sent anywhere but TMDb.
+      Don't have one? <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">Get a free key here</a>.
+    </div>
+    <input type="password" id="apiKeyInput" placeholder="Paste TMDb API key…" autocomplete="off">
+    <button class="btn" id="connectBtn">Connect</button>
+  </div>
+  <div class="keyerror" id="keyError">Couldn't validate that key — double-check it and try again.</div>
+</div>
+
+<div class="trakt-panel" id="traktPanel">
+  <div class="trakt-inner">
+    <h3>Your Trakt lists</h3>
+    <div class="trakt-row">
+      <input type="text" id="traktUsername" placeholder="Your Trakt username…" autocomplete="off">
+      <button class="btn small" id="traktSaveBtn">Save</button>
+    </div>
+    <div class="trakt-links" id="traktLinks"></div>
+    <div class="trakt-hint">These open your actual Trakt profile in a new tab — this tool doesn't pull your Trakt data in, it just gives you quick jumps to it.</div>
+  </div>
+</div>
+
+<div class="controls" id="controls">
+  <div class="type-toggle">
+    <button class="type-btn active" data-type="movie" id="movieBtn">MOVIES</button>
+    <button class="type-btn" data-type="tv" id="tvBtn">TV SHOWS</button>
+  </div>
+
+  <div class="search-wrap">
+    <span class="search-icon">&#9678;</span>
+    <input type="text" id="searchInput" placeholder="Search title…" autocomplete="off">
+  </div>
+
+  <div class="filter-row">
+    <div class="field"><label>Year from</label><input type="number" id="yearFrom" placeholder="1990" min="1900" max="2030"></div>
+    <div class="field"><label>Year to</label><input type="number" id="yearTo" placeholder="2026" min="1900" max="2030"></div>
+    <div class="field rating"><label>Min rating</label><input type="number" id="minRating" placeholder="0–10" min="0" max="10" step="0.5"></div>
+    <button class="btn small" id="applyFiltersBtn">Apply</button>
+  </div>
+
+  <details class="genre-panel" open>
+    <summary>This search — tap to require, tap again to cut (resets on reset)</summary>
+    <div class="chips" id="chipRow"></div>
+  </details>
+
+  <details class="genre-panel">
+    <summary>Permanently removed genres — always hidden, saved for next time</summary>
+    <div class="chips" id="permChipRow"></div>
+  </details>
+</div>
+
+<div class="status-row" id="statusRow" style="display:none;">
+  <span id="statusText">—</span>
+  <button id="resetBtn">reset this search</button>
+</div>
+
+<div class="loading-row" id="loadingRow" style="display:none;">loading reel…</div>
+<div class="grid" id="grid"></div>
+<div class="loadmore-wrap" id="loadMoreWrap" style="display:none;">
+  <button class="btn" id="loadMoreBtn">Load more</button>
+</div>
+<div class="empty" id="emptyState" style="display:none;">
+  <div class="big">NOTHING ON THIS REEL</div>
+  <div>Try loosening a genre exclusion, the year range, or the rating floor.</div>
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<footer>WARDWRIGHT TV — LIVE TMDB DATA, KEY STAYS IN-BROWSER, PERMANENT GENRE BLOCKS SAVED FOR YOU ONLY</footer>
+
+<script>
+const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+const PROFILE_BASE = "https://image.tmdb.org/t/p/w185";
+let apiKey = null;
+let mediaType = 'movie';
+let genreMaps = { movie:{}, tv:{} };
+let genreNameToIdMaps = { movie:{}, tv:{} };
+let permanentRemoved = { movie:new Set(), tv:new Set() };
+let state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null };
+let page = 1, totalPages = 1, currentResults = [], debounceTimer = null;
+let watchlist = []; // [{id, mediaType, title, year, vote_average, poster_path}]
+let watched = []; // [{id, mediaType}]
+let view = 'browse'; // 'browse' | 'watchlist'
+
+async function storageGet(key){
+  try{ return localStorage.getItem(key); }catch(e){ return null; }
+}
+async function storageSet(key, value){
+  try{ localStorage.setItem(key, value); }catch(e){ /* ignore — private browsing etc. */ }
+}
+
+document.getElementById('connectBtn').addEventListener('click', ()=>connect(document.getElementById('apiKeyInput').value.trim()));
+document.getElementById('apiKeyInput').addEventListener('keydown', e=>{ if(e.key==='Enter') connect(document.getElementById('apiKeyInput').value.trim()); });
+
+async function connect(key){
+  const errEl = document.getElementById('keyError');
+  errEl.style.display = 'none';
+  if(!key){ return; }
+  try{
+    const [movieGenres, tvGenres] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/genre/movie/list?api_key=${encodeURIComponent(key)}&language=en-US`).then(r=>{ if(!r.ok) throw new Error('bad'); return r.json(); }),
+      fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${encodeURIComponent(key)}&language=en-US`).then(r=>{ if(!r.ok) throw new Error('bad'); return r.json(); })
+    ]);
+    apiKey = key;
+    await storageSet('wardwright:tmdb-key', key);
+    movieGenres.genres.forEach(g=>{ genreMaps.movie[g.id]=g.name; genreNameToIdMaps.movie[g.name]=g.id; });
+    tvGenres.genres.forEach(g=>{ genreMaps.tv[g.id]=g.name; genreNameToIdMaps.tv[g.name]=g.id; });
+
+    const savedMovie = await storageGet('wardwright:perm-removed:movie');
+    const savedTv = await storageGet('wardwright:perm-removed:tv');
+    if(savedMovie) permanentRemoved.movie = new Set(JSON.parse(savedMovie));
+    if(savedTv) permanentRemoved.tv = new Set(JSON.parse(savedTv));
+    const savedUsername = await storageGet('wardwright:trakt-username');
+    if(savedUsername){
+      document.getElementById('traktUsername').value = savedUsername;
+      renderTraktLinks(savedUsername);
+    }
+    const savedWatchlist = await storageGet('wardwright:watchlist');
+    if(savedWatchlist) watchlist = JSON.parse(savedWatchlist);
+    const savedWatched = await storageGet('wardwright:watched');
+    if(savedWatched) watched = JSON.parse(savedWatched);
+    updateWatchBtnLabel();
+
+    document.getElementById('keycardInner').classList.add('connected');
+    document.getElementById('keycardLabel').innerHTML = '';
+    const pill = document.createElement('div');
+    pill.className = 'connected-pill';
+    pill.innerHTML = `<span class="dotlive"></span> Connected to TMDb — key remembered for next time`;
+    document.getElementById('keycardLabel').appendChild(pill);
+    document.getElementById('apiKeyInput').style.display = 'none';
+    const connectBtn = document.getElementById('connectBtn');
+    connectBtn.textContent = 'Forget key';
+    connectBtn.classList.add('small');
+    connectBtn.onclick = async ()=>{ apiKey = null; await storageSet('wardwright:tmdb-key', ''); location.reload(); };
+
+    document.getElementById('controls').classList.add('active');
+    document.getElementById('statusRow').style.display = 'flex';
+
+    buildChips();
+    buildPermChips();
+    resetAndFetch();
+  }catch(err){
+    errEl.style.display = 'block';
+  }
+}
+
+document.getElementById('traktToggleBtn').addEventListener('click', ()=>{
+  document.getElementById('traktPanel').classList.toggle('open');
+});
+
+function updateWatchBtnLabel(){
+  document.getElementById('watchToggleBtn').textContent = view === 'watchlist'
+    ? 'Back to browse'
+    : `To Watch (${watchlist.length})`;
+}
+
+document.getElementById('watchToggleBtn').addEventListener('click', ()=>{
+  view = view === 'watchlist' ? 'browse' : 'watchlist';
+  updateWatchBtnLabel();
+  if(view === 'watchlist'){
+    document.getElementById('controls').classList.remove('active');
+    document.getElementById('statusRow').style.display = 'none';
+    document.getElementById('loadMoreWrap').style.display = 'none';
+    renderWatchlistGrid();
+  }else{
+    document.getElementById('controls').classList.add('active');
+    document.getElementById('statusRow').style.display = 'flex';
+    renderResults();
+  }
+});
+
+function isInWatchlist(id, type){
+  return watchlist.some(w => w.id === id && w.mediaType === type);
+}
+
+function isWatched(id, type){
+  return watched.some(w => w.id === id && w.mediaType === type);
+}
+
+async function toggleWatched(id, type){
+  const idx = watched.findIndex(w => w.id === id && w.mediaType === type);
+  if(idx >= 0){
+    watched.splice(idx, 1);
+  }else{
+    watched.push({ id, mediaType: type });
+    // marking watched clears it off the "to watch" list automatically
+    const wlIdx = watchlist.findIndex(w => w.id === id && w.mediaType === type);
+    if(wlIdx >= 0) watchlist.splice(wlIdx, 1);
+    await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
+    updateWatchBtnLabel();
+  }
+  await storageSet('wardwright:watched', JSON.stringify(watched));
+}
+
+async function toggleWatch(item){
+  const idx = watchlist.findIndex(w => w.id === item.id && w.mediaType === item.mediaType);
+  if(idx >= 0) watchlist.splice(idx, 1);
+  else watchlist.push(item);
+  await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
+  updateWatchBtnLabel();
+  if(view === 'watchlist') renderWatchlistGrid();
+}
+
+function renderWatchlistGrid(){
+  document.getElementById('loadingRow').style.display = 'none';
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('emptyState');
+  grid.innerHTML = '';
+  if(watchlist.length === 0){
+    empty.style.display = 'block';
+    empty.querySelector('.big').textContent = 'NOTHING SAVED YET';
+    empty.querySelector('div:last-child').textContent = 'Tap "+ Watch" on a poster while browsing to save it here.';
+    return;
+  }
+  empty.style.display = 'none';
+  watchlist.forEach(item=>{
+    grid.appendChild(buildCard(item));
+  });
+}
+document.getElementById('traktSaveBtn').addEventListener('click', async ()=>{
+  const username = document.getElementById('traktUsername').value.trim();
+  if(!username) return;
+  await storageSet('wardwright:trakt-username', username);
+  renderTraktLinks(username);
+});
+function renderTraktLinks(username){
+  const wrap = document.getElementById('traktLinks');
+  const pages = [
+    ['Watchlist','watchlist'], ['Collection','collection'], ['History','history'],
+    ['Ratings','ratings/all'], ['Lists','lists']
+  ];
+  wrap.innerHTML = pages.map(([label,path])=>
+    `<a href="https://trakt.tv/users/${encodeURIComponent(username)}/${path}" target="_blank" rel="noopener">${label} ↗</a>`
+  ).join('');
+}
+
+document.getElementById('movieBtn').addEventListener('click', ()=>switchType('movie'));
+document.getElementById('tvBtn').addEventListener('click', ()=>switchType('tv'));
+function switchType(type){
+  if(type === mediaType) return;
+  mediaType = type;
+  document.getElementById('movieBtn').classList.toggle('active', type==='movie');
+  document.getElementById('tvBtn').classList.toggle('active', type==='tv');
+  state.include = new Set(); state.exclude = new Set();
+  buildChips(); buildPermChips();
+  resetAndFetch();
+}
+
+function buildChips(){
+  const row = document.getElementById('chipRow');
+  row.innerHTML = "";
+  Object.keys(genreNameToIdMaps[mediaType]).sort().forEach(name=>{
+    if(permanentRemoved[mediaType].has(name)) return;
+    const chip = document.createElement('button');
+    chip.className='chip';
+    chip.textContent=name;
+    chip.dataset.genre=name;
+    chip.addEventListener('click', ()=>cycleGenre(name));
+    row.appendChild(chip);
+  });
+}
+
+function buildPermChips(){
+  const row = document.getElementById('permChipRow');
+  row.innerHTML = "";
+  Object.keys(genreNameToIdMaps[mediaType]).sort().forEach(name=>{
+    const chip = document.createElement('button');
+    chip.className='chip permchip';
+    if(permanentRemoved[mediaType].has(name)) chip.classList.add('active');
+    chip.textContent = name;
+    chip.addEventListener('click', async ()=>{
+      if(permanentRemoved[mediaType].has(name)) permanentRemoved[mediaType].delete(name);
+      else permanentRemoved[mediaType].add(name);
+      await storageSet(`wardwright:perm-removed:${mediaType}`, JSON.stringify([...permanentRemoved[mediaType]]));
+      buildChips(); buildPermChips();
+      resetAndFetch();
+    });
+    row.appendChild(chip);
+  });
+}
+
+function cycleGenre(g){
+  if(state.include.has(g)){ state.include.delete(g); state.exclude.add(g); }
+  else if(state.exclude.has(g)){ state.exclude.delete(g); }
+  else { state.include.add(g); }
+  resetAndFetch();
+}
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null };
+  document.getElementById('searchInput').value = "";
+  document.getElementById('yearFrom').value = "";
+  document.getElementById('yearTo').value = "";
+  document.getElementById('minRating').value = "";
+  resetAndFetch();
+});
+
+document.getElementById('searchInput').addEventListener('input', e=>{
+  state.search = e.target.value;
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(resetAndFetch, 400);
+});
+
+document.getElementById('applyFiltersBtn').addEventListener('click', ()=>{
+  const yf = document.getElementById('yearFrom').value;
+  const yt = document.getElementById('yearTo').value;
+  const mr = document.getElementById('minRating').value;
+  state.yearFrom = yf ? parseInt(yf,10) : null;
+  state.yearTo = yt ? parseInt(yt,10) : null;
+  state.minRating = mr ? parseFloat(mr) : null;
+  resetAndFetch();
+});
+
+document.getElementById('loadMoreBtn').addEventListener('click', ()=>{ page += 1; fetchResults(false); });
+
+function resetAndFetch(){ page = 1; currentResults = []; fetchResults(true); }
+function dateFieldForType(){ return mediaType === 'movie' ? 'primary_release_date' : 'first_air_date'; }
+
+async function fetchResults(isFresh){
+  document.querySelectorAll('#chipRow .chip').forEach(chip=>{
+    const g = chip.dataset.genre;
+    chip.classList.toggle('include', state.include.has(g));
+    chip.classList.toggle('exclude', state.exclude.has(g));
+  });
+
+  if(isFresh){
+    document.getElementById('grid').innerHTML = '';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('loadingRow').style.display = 'block';
+  }
+  document.getElementById('loadMoreWrap').style.display = 'none';
+
+  const term = state.search.trim();
+  const genreNameToId = genreNameToIdMaps[mediaType];
+  const fullExclude = new Set([...state.exclude, ...permanentRemoved[mediaType]]);
+  let url;
+
+  if(term){
+    const endpoint = mediaType === 'movie' ? 'search/movie' : 'search/tv';
+    url = `https://api.themoviedb.org/3/${endpoint}?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(term)}&page=${page}&include_adult=false`;
+  }else{
+    const endpoint = mediaType === 'movie' ? 'discover/movie' : 'discover/tv';
+    let params = '';
+    if(state.include.size) params += `&with_genres=${[...state.include].map(g=>genreNameToId[g]).join(',')}`;
+    if(fullExclude.size) params += `&without_genres=${[...fullExclude].map(g=>genreNameToId[g]).join(',')}`;
+    if(state.yearFrom) params += `&${dateFieldForType()}.gte=${state.yearFrom}-01-01`;
+    if(state.yearTo) params += `&${dateFieldForType()}.lte=${state.yearTo}-12-31`;
+    if(state.minRating!==null) params += `&vote_average.gte=${state.minRating}&vote_count.gte=20`;
+    url = `https://api.themoviedb.org/3/${endpoint}?api_key=${encodeURIComponent(apiKey)}&sort_by=popularity.desc&page=${page}${params}`;
+  }
+
+  try{
+    const res = await fetch(url);
+    const data = await res.json();
+    totalPages = data.total_pages || 1;
+    let results = data.results || [];
+
+    if(term){
+      results = results.filter(m=>{
+        const ids = m.genre_ids || [];
+        if(state.include.size && ![...state.include].some(g=>ids.includes(genreNameToId[g]))) return false;
+        if(fullExclude.size && [...fullExclude].some(g=>ids.includes(genreNameToId[g]))) return false;
+        const dateStr = mediaType === 'movie' ? m.release_date : m.first_air_date;
+        const yr = dateStr ? parseInt(dateStr.slice(0,4),10) : null;
+        if(state.yearFrom && (!yr || yr < state.yearFrom)) return false;
+        if(state.yearTo && (!yr || yr > state.yearTo)) return false;
+        if(state.minRating!==null && (m.vote_average||0) < state.minRating) return false;
+        return true;
+      });
+    }
+
+    // never show titles already marked watched, regardless of how we got the results
+    results = results.filter(m => !isWatched(m.id, mediaType));
+
+    currentResults = isFresh ? results : currentResults.concat(results);
+    renderResults(data.total_results);
+  }catch(err){
+    document.getElementById('loadingRow').style.display = 'block';
+    document.getElementById('loadingRow').textContent = 'Something went wrong talking to TMDb. Try again.';
+  }
+}
+
+function buildCard(m){
+  const id = m.id;
+  const type = m.mediaType || mediaType;
+  const title = m.title || m.name || m.savedTitle;
+  const dateStr = m.release_date || m.first_air_date || null;
+  const year = m.year || (dateStr || '').slice(0,4) || '—';
+  const rating = (m.vote_average!==undefined ? m.vote_average : m.rating) || 0;
+  const posterPath = m.poster_path || null;
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  const posterHtml = posterPath
+    ? `<img class="poster-img" src="${IMG_BASE}${posterPath}" alt="${title} poster" loading="lazy">`
+    : `<div class="poster-fallback">${title}</div>`;
+  const saved = isInWatchlist(id, type);
+  const done = isWatched(id, type);
+  const posterWrapHtml = `
+    <div class="poster-wrap">
+      <button class="watch-btn ${saved ? 'saved' : ''}" type="button">${saved ? '✓ Saved' : '+ Watch'}</button>
+      <button class="watched-btn ${done ? 'done' : ''}" type="button">${done ? '✓ Watched' : 'Watched'}</button>
+      ${posterHtml}
+    </div>`;
+  card.innerHTML = `
+    ${posterWrapHtml}
+    <div class="card-body">
+      <div class="card-title">${title}</div>
+      <div class="card-meta"><span>${year}</span><span>&#9733; ${rating.toFixed(1)}</span></div>
+    </div>`;
+  card.querySelector('.watch-btn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    toggleWatch({ id, mediaType: type, savedTitle: title, year, rating, poster_path: posterPath });
+    e.target.classList.toggle('saved');
+    e.target.textContent = e.target.classList.contains('saved') ? '✓ Saved' : '+ Watch';
+  });
+  card.querySelector('.watched-btn').addEventListener('click', async (e)=>{
+    e.stopPropagation();
+    await toggleWatched(id, type);
+    if(isWatched(id, type)){
+      // marked watched — pull it out of whatever grid is currently showing
+      card.remove();
+    }else{
+      e.target.classList.remove('done');
+      e.target.textContent = 'Watched';
+    }
+  });
+  card.addEventListener('click', ()=>openDetail(id, type));
+  return card;
+}
+
+function renderResults(totalResults){
+  document.getElementById('loadingRow').style.display = 'none';
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('emptyState');
+  grid.innerHTML = '';
+
+  if(currentResults.length === 0){
+    empty.style.display = 'block';
+  }else{
+    empty.style.display = 'none';
+    currentResults.forEach(m=>{
+      grid.appendChild(buildCard(m));
+    });
+  }
+
+  const status = document.getElementById('statusText');
+  const parts = [];
+  parts.push(`${currentResults.length} loaded${totalResults ? ` of ~${totalResults.toLocaleString()}` : ''}`);
+  if(state.include.size) parts.push(`requiring: ${[...state.include].join(', ')}`);
+  if(state.exclude.size) parts.push(`cut this search: ${[...state.exclude].join(', ')}`);
+  if(permanentRemoved[mediaType].size) parts.push(`always hidden: ${[...permanentRemoved[mediaType]].join(', ')}`);
+  if(state.yearFrom || state.yearTo) parts.push(`years: ${state.yearFrom||'…'}–${state.yearTo||'…'}`);
+  if(state.minRating!==null) parts.push(`rating ≥ ${state.minRating}`);
+  status.textContent = parts.join('  —  ');
+
+  document.getElementById('loadMoreWrap').style.display = (page < totalPages && currentResults.length > 0) ? 'flex' : 'none';
+}
+
+async function openDetail(id, typeOverride){
+  const detailType = typeOverride || mediaType;
+  const backdrop = document.getElementById('modalBackdrop');
+  const content = document.getElementById('modalContent');
+  content.innerHTML = `<button class="modal-close" id="modalCloseBtn">&times;</button><div class="loading-row">loading details…</div>`;
+  backdrop.classList.add('open');
+  document.getElementById('modalCloseBtn').addEventListener('click', closeDetail);
+  backdrop.addEventListener('click', e=>{ if(e.target === backdrop) closeDetail(); }, { once:true });
+
+  const endpoint = detailType === 'movie' ? 'movie' : 'tv';
+  try{
+    const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${encodeURIComponent(apiKey)}&append_to_response=credits`);
+    const d = await res.json();
+    const title = detailType === 'movie' ? d.title : d.name;
+    const dateStr = detailType === 'movie' ? d.release_date : d.first_air_date;
+    const year = (dateStr || '').slice(0,4) || '—';
+    const runtime = detailType === 'movie'
+      ? (d.runtime ? `${d.runtime} min` : '—')
+      : (d.number_of_seasons ? `${d.number_of_seasons} season${d.number_of_seasons>1?'s':''}, ${d.number_of_episodes||'?'} eps` : '—');
+    const cast = (d.credits && d.credits.cast) ? d.credits.cast.slice(0,8) : [];
+
+    content.innerHTML = `
+      <button class="modal-close" id="modalCloseBtn2">&times;</button>
+      <div class="modal-hero">
+        <div class="modal-poster">
+          ${d.poster_path ? `<img src="${IMG_BASE}${d.poster_path}" alt="${title} poster">` : ''}
+        </div>
+        <div>
+          <div class="modal-title">${title}</div>
+          ${d.tagline ? `<div class="modal-tagline">"${d.tagline}"</div>` : ''}
+          <div class="modal-meta">
+            <span>${year}</span>
+            <span>&#9733; ${(d.vote_average||0).toFixed(1)}</span>
+            <span>${runtime}</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section-label">Overview</div>
+        <div class="modal-overview">${d.overview || 'No overview available.'}</div>
+        <div class="modal-section-label">Genres</div>
+        <div class="modal-genres">${(d.genres||[]).map(g=>`<span class="tag">${g.name}</span>`).join('')}</div>
+        ${cast.length ? `
+          <div class="modal-section-label">Top cast</div>
+          <div class="modal-cast">
+            ${cast.map(c=>`
+              <div class="cast-item">
+                ${c.profile_path ? `<img src="${PROFILE_BASE}${c.profile_path}" alt="${c.name}">` : `<div style="width:74px;height:74px;border-radius:50%;background:var(--ink-3);margin-bottom:5px;"></div>`}
+                <div class="name">${c.name}</div>
+              </div>`).join('')}
+          </div>` : ''}
+      </div>
+    `;
+    document.getElementById('modalCloseBtn2').addEventListener('click', closeDetail);
+  }catch(err){
+    content.innerHTML = `<button class="modal-close" id="modalCloseBtn3">&times;</button><div class="loading-row">Couldn't load details. Try again.</div>`;
+    document.getElementById('modalCloseBtn3').addEventListener('click', closeDetail);
+  }
+}
+function closeDetail(){ document.getElementById('modalBackdrop').classList.remove('open'); }
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeDetail(); });
+
+(async function initFromSavedKey(){
+  const saved = await storageGet('wardwright:tmdb-key');
+  if(saved){
+    document.getElementById('apiKeyInput').value = saved;
+    connect(saved);
+  }
+})();
+</script>
+</body>
+</html>
