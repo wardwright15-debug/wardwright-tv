@@ -113,6 +113,13 @@
     font-size:12.5px; padding:7px 9px; border-radius:3px; outline:none; width:90px;
   }
   .field.rating input{ width:70px; }
+  .lang-field{ justify-content:flex-end; }
+  .lang-checkbox{
+    display:flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
+    color:var(--paper); cursor:pointer; padding:7px 0;
+  }
+  .lang-checkbox input{ width:16px; height:16px; accent-color:var(--claret-bright); cursor:pointer; }
+  .prov-row{ display:flex; gap:12px; flex-wrap:wrap; }
 
   details.genre-panel{ margin-bottom:12px; }
   details.genre-panel summary{
@@ -275,6 +282,18 @@
     <div class="field"><label>Year from</label><input type="number" id="yearFrom" placeholder="1990" min="1900" max="2030"></div>
     <div class="field"><label>Year to</label><input type="number" id="yearTo" placeholder="2026" min="1900" max="2030"></div>
     <div class="field rating"><label>Min rating</label><input type="number" id="minRating" placeholder="0–10" min="0" max="10" step="0.5"></div>
+    <div class="field lang-field">
+      <label>Language</label>
+      <label class="lang-checkbox"><input type="checkbox" id="englishOnly"> English only</label>
+    </div>
+    <div class="field lang-field">
+      <label>Streaming now (UK)</label>
+      <div class="prov-row">
+        <label class="lang-checkbox"><input type="checkbox" id="provNetflix"> Netflix</label>
+        <label class="lang-checkbox"><input type="checkbox" id="provPrime"> Prime</label>
+        <label class="lang-checkbox"><input type="checkbox" id="provDisney"> Disney+</label>
+      </div>
+    </div>
     <button class="btn small" id="applyFiltersBtn">Apply</button>
   </div>
 
@@ -312,6 +331,39 @@
 
 <script>
 const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+
+async function loadWatchProviders(){
+  try{
+    const [movieProv, tvProv] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/watch/providers/movie?api_key=${encodeURIComponent(apiKey)}&watch_region=GB`).then(r=>r.json()),
+      fetch(`https://api.themoviedb.org/3/watch/providers/tv?api_key=${encodeURIComponent(apiKey)}&watch_region=GB`).then(r=>r.json())
+    ]);
+    watchProviderIds.movie = extractProviderIds(movieProv.results || []);
+    watchProviderIds.tv = extractProviderIds(tvProv.results || []);
+  }catch(e){ /* filter just won't have effect if this fails */ }
+}
+function extractProviderIds(list){
+  const find = (needle) => {
+    const m = list.find(p => p.provider_name && p.provider_name.toLowerCase().includes(needle));
+    return m ? m.provider_id : null;
+  };
+  return { netflix: find('netflix'), prime: find('prime'), disney: find('disney') };
+}
+async function filterByProviders(results, type){
+  const ids = [...state.providers].map(k => watchProviderIds[type][k]).filter(Boolean);
+  if(!ids.length) return results;
+  const endpoint = type === 'movie' ? 'movie' : 'tv';
+  const checked = await Promise.all(results.map(async m=>{
+    try{
+      const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${m.id}/watch/providers?api_key=${encodeURIComponent(apiKey)}`);
+      const data = await res.json();
+      const gb = data.results && data.results.GB;
+      const flatrate = (gb && gb.flatrate) ? gb.flatrate.map(p=>p.provider_id) : [];
+      return ids.some(id => flatrate.includes(id)) ? m : null;
+    }catch(e){ return null; }
+  }));
+  return checked.filter(Boolean);
+}
 const TRAKT_CLIENT_ID = "ooUoRJGcyZMSiwW5h3blYM02h30GTyusv1ZwAcBZgLc";
 const TRAKT_CLIENT_SECRET = "1sm_skWsun3OZZvCncmsrb5sV4wYgUmIAgGsWU1M4WA";
 const TRAKT_REDIRECT = "urn:ietf:wg:oauth:2.0:oob";
@@ -324,9 +376,10 @@ const PROFILE_BASE = "https://image.tmdb.org/t/p/w185";
 let apiKey = null;
 let mediaType = 'movie';
 let genreMaps = { movie:{}, tv:{} };
+let watchProviderIds = { movie:{netflix:null, prime:null, disney:null}, tv:{netflix:null, prime:null, disney:null} };
 let genreNameToIdMaps = { movie:{}, tv:{} };
 let permanentRemoved = { movie:new Set(), tv:new Set() };
-let state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null };
+let state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null, englishOnly:false, providers:new Set() };
 let page = 1, totalPages = 1, currentResults = [], debounceTimer = null;
 let watchlist = []; // [{id, mediaType, title, year, vote_average, poster_path}]
 let watched = []; // [{id, mediaType}]
@@ -507,6 +560,7 @@ async function connect(key){
     await storageSet('wardwright:tmdb-key', key);
     movieGenres.genres.forEach(g=>{ genreMaps.movie[g.id]=g.name; genreNameToIdMaps.movie[g.name]=g.id; });
     tvGenres.genres.forEach(g=>{ genreMaps.tv[g.id]=g.name; genreNameToIdMaps.tv[g.name]=g.id; });
+    loadWatchProviders(); // fire-and-forget, filter just won't apply until it resolves
 
     const savedMovie = await storageGet('wardwright:perm-removed:movie');
     const savedTv = await storageGet('wardwright:perm-removed:tv');
@@ -727,11 +781,15 @@ function cycleGenre(g){
 }
 
 document.getElementById('resetBtn').addEventListener('click', ()=>{
-  state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null };
+  state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null, englishOnly:false, providers:new Set() };
   document.getElementById('searchInput').value = "";
   document.getElementById('yearFrom').value = "";
   document.getElementById('yearTo').value = "";
   document.getElementById('minRating').value = "";
+  document.getElementById('englishOnly').checked = false;
+  document.getElementById('provNetflix').checked = false;
+  document.getElementById('provPrime').checked = false;
+  document.getElementById('provDisney').checked = false;
   resetAndFetch();
 });
 
@@ -748,6 +806,12 @@ document.getElementById('applyFiltersBtn').addEventListener('click', ()=>{
   state.yearFrom = yf ? parseInt(yf,10) : null;
   state.yearTo = yt ? parseInt(yt,10) : null;
   state.minRating = mr ? parseFloat(mr) : null;
+  state.englishOnly = document.getElementById('englishOnly').checked;
+  state.providers = new Set([
+    document.getElementById('provNetflix').checked ? 'netflix' : null,
+    document.getElementById('provPrime').checked ? 'prime' : null,
+    document.getElementById('provDisney').checked ? 'disney' : null,
+  ].filter(Boolean));
   resetAndFetch();
 });
 
@@ -786,6 +850,11 @@ async function fetchResults(isFresh){
     if(state.yearFrom) params += `&${dateFieldForType()}.gte=${state.yearFrom}-01-01`;
     if(state.yearTo) params += `&${dateFieldForType()}.lte=${state.yearTo}-12-31`;
     if(state.minRating!==null) params += `&vote_average.gte=${state.minRating}&vote_count.gte=20`;
+    if(state.englishOnly) params += `&with_original_language=en`;
+    if(state.providers.size){
+      const ids = [...state.providers].map(k => watchProviderIds[mediaType][k]).filter(Boolean);
+      if(ids.length) params += `&with_watch_providers=${ids.join('|')}&watch_region=GB&with_watch_monetization_types=flatrate`;
+    }
     url = `https://api.themoviedb.org/3/${endpoint}?api_key=${encodeURIComponent(apiKey)}&sort_by=popularity.desc&page=${page}${params}`;
   }
 
@@ -805,8 +874,12 @@ async function fetchResults(isFresh){
         if(state.yearFrom && (!yr || yr < state.yearFrom)) return false;
         if(state.yearTo && (!yr || yr > state.yearTo)) return false;
         if(state.minRating!==null && (m.vote_average||0) < state.minRating) return false;
+        if(state.englishOnly && m.original_language !== 'en') return false;
         return true;
       });
+      if(state.providers.size){
+        results = await filterByProviders(results, mediaType);
+      }
     }
 
     // never show titles already marked watched, regardless of how we got the results
@@ -898,6 +971,9 @@ function renderResults(totalResults){
   if(permanentRemoved[mediaType].size) parts.push(`always hidden: ${[...permanentRemoved[mediaType]].join(', ')}`);
   if(state.yearFrom || state.yearTo) parts.push(`years: ${state.yearFrom||'…'}–${state.yearTo||'…'}`);
   if(state.minRating!==null) parts.push(`rating ≥ ${state.minRating}`);
+  if(state.englishOnly) parts.push(`english only`);
+  if(state.providers.size) parts.push(`streaming: ${[...state.providers].join(', ')}`);
+  document.getElementById('statusText').textContent = parts.join('  —  ');
   status.textContent = parts.join('  —  ');
 
   document.getElementById('loadMoreWrap').style.display = (page < totalPages && currentResults.length > 0) ? 'flex' : 'none';
