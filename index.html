@@ -4,8 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wardwright TV</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6b0f2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wardwright">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
     --ink:#eaf6fb; --ink-2:#d3ecf7; --ink-3:#b9e1f2;
@@ -49,11 +57,11 @@
   .keycard-inner.connected{ border-color:var(--blue-glow); }
   .keycard-label{ font-family:'JetBrains Mono',monospace; font-weight:600; font-size:11.5px; color:var(--paper-dim); flex:1 1 220px; line-height:1.5; }
   .keycard-label a{ color:var(--blue-glow); }
-  #apiKeyInput{
+  #apiKeyInput, .auth-input{
     flex:1 1 240px; background:var(--ink); border:2px solid var(--line); color:var(--paper); font-weight:600;
     font-family:'JetBrains Mono',monospace; font-size:13px; padding:9px 12px; border-radius:3px; outline:none;
   }
-  #apiKeyInput:focus{ border-color:var(--blue-bright); }
+  #apiKeyInput:focus, .auth-input:focus{ border-color:var(--blue-bright); }
   .connected-pill{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-glow); display:flex; align-items:center; gap:8px; }
   .dotlive{ width:8px;height:8px;border-radius:50%; background:var(--blue-glow); box-shadow:0 0 6px var(--blue-glow); }
   .keyerror{ color:var(--claret-glow); font-family:'JetBrains Mono',monospace; font-size:12px; margin-top:8px; display:none; }
@@ -236,7 +244,20 @@
   </div>
 </div>
 
-<div class="keycard">
+<div class="keycard" id="loginCard">
+  <div class="keycard-inner" id="loginCardInner">
+    <div class="keycard-label" id="loginLabel">
+      Sign in to sync your watchlist, watched list, and genre blocks across devices. Use the same email and password on every device to share the same data.
+    </div>
+    <input type="email" id="loginEmail" class="auth-input" placeholder="Email…" autocomplete="username">
+    <input type="password" id="loginPassword" class="auth-input" placeholder="Password…" autocomplete="current-password">
+    <button class="btn" id="loginBtn">Sign in</button>
+    <button class="btn small" id="signupBtn">Create account</button>
+  </div>
+  <div class="keyerror" id="loginError"></div>
+</div>
+
+<div class="keycard" id="tmdbCard" style="display:none;">
   <div class="keycard-inner" id="keycardInner">
     <div class="keycard-label" id="keycardLabel">
       Paste your TMDb API key (v3 auth) to connect. It stays in this browser tab only — never sent anywhere but TMDb.
@@ -398,6 +419,75 @@ let page = 1, totalPages = 1, currentResults = [], debounceTimer = null;
 let watchlist = []; // [{id, mediaType, title, year, vote_average, poster_path}]
 let watched = []; // [{id, mediaType}]
 let view = 'browse'; // 'browse' | 'watchlist'
+
+// ---- Supabase (shared, synced data: watchlist, watched, permanent genre blocks) ----
+const SUPABASE_URL = "https://dalyzjsmfdglahygpwsq.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_gS-xe-tfxyNKfzBPH8sR0w__hnmKE5P";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+async function cloudGet(key){
+  const { data: userData } = await sb.auth.getUser();
+  const user = userData && userData.user;
+  if(!user) return null;
+  try{
+    const { data, error } = await sb.from('kv_store').select('value').eq('user_id', user.id).eq('key', key).maybeSingle();
+    if(error || !data) return null;
+    return data.value;
+  }catch(e){ return null; }
+}
+async function cloudSet(key, value){
+  const { data: userData } = await sb.auth.getUser();
+  const user = userData && userData.user;
+  if(!user) return;
+  try{
+    const { data: existing } = await sb.from('kv_store').select('id').eq('user_id', user.id).eq('key', key).maybeSingle();
+    if(existing){
+      await sb.from('kv_store').update({ value }).eq('id', existing.id);
+    }else{
+      await sb.from('kv_store').insert({ user_id: user.id, key, value });
+    }
+  }catch(e){ /* if this fails, data just won't sync this time */ }
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('loginError');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+document.getElementById('loginBtn').addEventListener('click', async ()=>{
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if(!email || !password){ showLoginError('Enter both an email and password.'); return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  onSignedIn();
+});
+
+document.getElementById('signupBtn').addEventListener('click', async ()=>{
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if(!email || !password){ showLoginError('Enter both an email and password.'); return; }
+  if(password.length < 6){ showLoginError('Password needs to be at least 6 characters.'); return; }
+  const { error } = await sb.auth.signUp({ email, password });
+  if(error){ showLoginError(error.message); return; }
+  showLoginError('Account created — check your email if confirmation is required, otherwise you\'re signed in.');
+  onSignedIn();
+});
+
+function onSignedIn(){
+  document.getElementById('loginCard').style.display = 'none';
+  document.getElementById('tmdbCard').style.display = 'block';
+  initFromSavedKey();
+}
+
+async function checkExistingSession(){
+  const { data } = await sb.auth.getSession();
+  if(data && data.session){
+    onSignedIn();
+  }
+}
+checkExistingSession();
 
 async function storageGet(key){
   try{ return localStorage.getItem(key); }catch(e){ return null; }
@@ -576,8 +666,8 @@ async function connect(key){
     tvGenres.genres.forEach(g=>{ genreMaps.tv[g.id]=g.name; genreNameToIdMaps.tv[g.name]=g.id; });
     loadWatchProviders(); // fire-and-forget, filter just won't apply until it resolves
 
-    const savedMovie = await storageGet('wardwright:perm-removed:movie');
-    const savedTv = await storageGet('wardwright:perm-removed:tv');
+    const savedMovie = await cloudGet('perm-removed:movie');
+    const savedTv = await cloudGet('perm-removed:tv');
     if(savedMovie) permanentRemoved.movie = new Set(JSON.parse(savedMovie));
     if(savedTv) permanentRemoved.tv = new Set(JSON.parse(savedTv));
     const savedUsername = await storageGet('wardwright:trakt-username');
@@ -585,9 +675,9 @@ async function connect(key){
       document.getElementById('traktUsername').value = savedUsername;
       renderTraktLinks(savedUsername);
     }
-    const savedWatchlist = await storageGet('wardwright:watchlist');
+    const savedWatchlist = await cloudGet('watchlist');
     if(savedWatchlist) watchlist = JSON.parse(savedWatchlist);
-    const savedWatched = await storageGet('wardwright:watched');
+    const savedWatched = await cloudGet('watched');
     if(savedWatched) watched = JSON.parse(savedWatched);
     updateWatchBtnLabel();
     updateWatchedBtnLabel();
@@ -675,11 +765,11 @@ async function toggleWatched(item){
     const wlIdx = watchlist.findIndex(w => w.id === id && w.mediaType === type);
     if(wlIdx >= 0){
       watchlist.splice(wlIdx, 1);
-      await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
+      await cloudSet('watchlist', JSON.stringify(watchlist));
       updateWatchBtnLabel();
     }
   }
-  await storageSet('wardwright:watched', JSON.stringify(watched));
+  await cloudSet('watched', JSON.stringify(watched));
   updateWatchedBtnLabel();
   return nowWatched;
 }
@@ -688,7 +778,7 @@ async function toggleWatch(item){
   const idx = watchlist.findIndex(w => w.id === item.id && w.mediaType === item.mediaType);
   if(idx >= 0) watchlist.splice(idx, 1);
   else watchlist.push(item);
-  await storageSet('wardwright:watchlist', JSON.stringify(watchlist));
+  await cloudSet('watchlist', JSON.stringify(watchlist));
   updateWatchBtnLabel();
   if(view === 'watchlist') renderWatchlistGrid();
 }
@@ -781,7 +871,7 @@ function buildPermChips(){
     chip.addEventListener('click', async ()=>{
       if(permanentRemoved[mediaType].has(name)) permanentRemoved[mediaType].delete(name);
       else permanentRemoved[mediaType].add(name);
-      await storageSet(`wardwright:perm-removed:${mediaType}`, JSON.stringify([...permanentRemoved[mediaType]]));
+      await cloudSet(`perm-removed:${mediaType}`, JSON.stringify([...permanentRemoved[mediaType]]));
       buildChips(); buildPermChips();
       resetAndFetch();
     });
@@ -1164,13 +1254,13 @@ async function openDetail(id, typeOverride){
 function closeDetail(){ document.getElementById('modalBackdrop').classList.remove('open'); }
 document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeDetail(); });
 
-(async function initFromSavedKey(){
+async function initFromSavedKey(){
   const saved = await storageGet('wardwright:tmdb-key');
   if(saved){
     document.getElementById('apiKeyInput').value = saved;
     connect(saved);
   }
-})();
+}
 </script>
 </body>
 </html>
