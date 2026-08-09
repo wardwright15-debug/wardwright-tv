@@ -306,6 +306,11 @@
     <summary>Permanently removed genres — always hidden, saved for next time</summary>
     <div class="chips" id="permChipRow"></div>
   </details>
+
+  <details class="genre-panel" open>
+    <summary>Extra categories — Rom-Com, Sport, Biography, True Story, LGBTQ+</summary>
+    <div class="chips" id="customChipRow"></div>
+  </details>
 </div>
 
 <div class="status-row" id="statusRow" style="display:none;">
@@ -380,6 +385,15 @@ let watchProviderIds = { movie:{netflix:null, prime:null, disney:null}, tv:{netf
 let genreNameToIdMaps = { movie:{}, tv:{} };
 let permanentRemoved = { movie:new Set(), tv:new Set() };
 let state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null, englishOnly:false, providers:new Set() };
+let customState = { include:new Set(), exclude:new Set() }; // extra-category keys: romcom, sport, biography, truestory, lgbtq
+const CUSTOM_CATEGORIES = [
+  { key:'romcom',     label:'Rom-Com',    type:'genrepair', genres:['Romance','Comedy'] },
+  { key:'sport',      label:'Sport',      type:'keyword', query:'sport' },
+  { key:'biography',  label:'Biography',  type:'keyword', query:'biography' },
+  { key:'truestory',  label:'True Story', type:'keyword', query:'based on true story' },
+  { key:'lgbtq',      label:'LGBTQ+',     type:'keyword', query:'lgbt' }
+];
+let keywordIdCache = {}; // query -> tmdb keyword id (or null if not found)
 let page = 1, totalPages = 1, currentResults = [], debounceTimer = null;
 let watchlist = []; // [{id, mediaType, title, year, vote_average, poster_path}]
 let watched = []; // [{id, mediaType}]
@@ -595,6 +609,7 @@ async function connect(key){
 
     buildChips();
     buildPermChips();
+    buildCustomChips();
     resetAndFetch();
   }catch(err){
     errEl.style.display = 'block';
@@ -736,7 +751,8 @@ function switchType(type){
   document.getElementById('movieBtn').classList.toggle('active', type==='movie');
   document.getElementById('tvBtn').classList.toggle('active', type==='tv');
   state.include = new Set(); state.exclude = new Set();
-  buildChips(); buildPermChips();
+  customState = { include:new Set(), exclude:new Set() };
+  buildChips(); buildPermChips(); buildCustomChips();
   resetAndFetch();
 }
 
@@ -773,6 +789,47 @@ function buildPermChips(){
   });
 }
 
+function buildCustomChips(){
+  const row = document.getElementById('customChipRow');
+  row.innerHTML = "";
+  CUSTOM_CATEGORIES.forEach(cat=>{
+    const chip = document.createElement('button');
+    chip.className='chip';
+    chip.textContent=cat.label;
+    chip.dataset.cat=cat.key;
+    chip.addEventListener('click', ()=>cycleCustom(cat.key));
+    row.appendChild(chip);
+  });
+}
+
+function cycleCustom(key){
+  if(customState.include.has(key)){ customState.include.delete(key); customState.exclude.add(key); }
+  else if(customState.exclude.has(key)){ customState.exclude.delete(key); }
+  else { customState.include.add(key); }
+  resetAndFetch();
+}
+
+async function resolveKeywordId(query){
+  if(query in keywordIdCache) return keywordIdCache[query];
+  try{
+    const res = await fetch(`https://api.themoviedb.org/3/search/keyword?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    const match = (data.results || []).find(k => k.name.toLowerCase() === query.toLowerCase()) || (data.results || [])[0];
+    keywordIdCache[query] = match ? match.id : null;
+  }catch(e){
+    keywordIdCache[query] = null;
+  }
+  return keywordIdCache[query];
+}
+
+// Rom-Com works off genre_ids, which both search and discover results already carry —
+// so unlike the keyword categories, this one applies whether you're browsing or searching.
+function itemMatchesGenrePair(m, cat){
+  const ids = m.genre_ids || [];
+  const genreNameToId = genreNameToIdMaps[mediaType];
+  return cat.genres.every(name => ids.includes(genreNameToId[name]));
+}
+
 function cycleGenre(g){
   if(state.include.has(g)){ state.include.delete(g); state.exclude.add(g); }
   else if(state.exclude.has(g)){ state.exclude.delete(g); }
@@ -782,6 +839,7 @@ function cycleGenre(g){
 
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   state = { search:"", include:new Set(), exclude:new Set(), yearFrom:null, yearTo:null, minRating:null, englishOnly:false, providers:new Set() };
+  customState = { include:new Set(), exclude:new Set() };
   document.getElementById('searchInput').value = "";
   document.getElementById('yearFrom').value = "";
   document.getElementById('yearTo').value = "";
@@ -826,6 +884,11 @@ async function fetchResults(isFresh){
     chip.classList.toggle('include', state.include.has(g));
     chip.classList.toggle('exclude', state.exclude.has(g));
   });
+  document.querySelectorAll('#customChipRow .chip').forEach(chip=>{
+    const k = chip.dataset.cat;
+    chip.classList.toggle('include', customState.include.has(k));
+    chip.classList.toggle('exclude', customState.exclude.has(k));
+  });
 
   if(isFresh){
     document.getElementById('grid').innerHTML = '';
@@ -837,6 +900,12 @@ async function fetchResults(isFresh){
   const term = state.search.trim();
   const genreNameToId = genreNameToIdMaps[mediaType];
   const fullExclude = new Set([...state.exclude, ...permanentRemoved[mediaType]]);
+
+  // resolve keyword ids for any active keyword-type extra categories (cached after first lookup)
+  const activeCustomKeys = new Set([...customState.include, ...customState.exclude]);
+  const keywordCats = CUSTOM_CATEGORIES.filter(c => c.type === 'keyword' && activeCustomKeys.has(c.key));
+  await Promise.all(keywordCats.map(c => resolveKeywordId(c.query)));
+
   let url;
 
   if(term){
@@ -845,8 +914,13 @@ async function fetchResults(isFresh){
   }else{
     const endpoint = mediaType === 'movie' ? 'discover/movie' : 'discover/tv';
     let params = '';
-    if(state.include.size) params += `&with_genres=${[...state.include].map(g=>genreNameToId[g]).join(',')}`;
-    if(fullExclude.size) params += `&without_genres=${[...fullExclude].map(g=>genreNameToId[g]).join(',')}`;
+    let includeGenreIds = [...state.include].map(g=>genreNameToId[g]);
+    if(customState.include.has('romcom')){
+      const romcomCat = CUSTOM_CATEGORIES.find(c=>c.key==='romcom');
+      includeGenreIds = includeGenreIds.concat(romcomCat.genres.map(g=>genreNameToId[g]));
+    }
+    if(includeGenreIds.length) params += `&with_genres=${[...new Set(includeGenreIds)].join(',')}`;
+    if(fullExclude.size) params += `&without_genres=${[...fullExclude].join(',').length ? [...fullExclude].map(g=>genreNameToId[g]).join(',') : ''}`;
     if(state.yearFrom) params += `&${dateFieldForType()}.gte=${state.yearFrom}-01-01`;
     if(state.yearTo) params += `&${dateFieldForType()}.lte=${state.yearTo}-12-31`;
     if(state.minRating!==null) params += `&vote_average.gte=${state.minRating}&vote_count.gte=20`;
@@ -855,6 +929,10 @@ async function fetchResults(isFresh){
       const ids = [...state.providers].map(k => watchProviderIds[mediaType][k]).filter(Boolean);
       if(ids.length) params += `&with_watch_providers=${ids.join('|')}&watch_region=GB&with_watch_monetization_types=flatrate`;
     }
+    const includeKeywordIds = keywordCats.filter(c => customState.include.has(c.key)).map(c => keywordIdCache[c.query]).filter(Boolean);
+    const excludeKeywordIds = keywordCats.filter(c => customState.exclude.has(c.key)).map(c => keywordIdCache[c.query]).filter(Boolean);
+    if(includeKeywordIds.length) params += `&with_keywords=${includeKeywordIds.join(',')}`;
+    if(excludeKeywordIds.length) params += `&without_keywords=${excludeKeywordIds.join(',')}`;
     url = `https://api.themoviedb.org/3/${endpoint}?api_key=${encodeURIComponent(apiKey)}&sort_by=popularity.desc&page=${page}${params}`;
   }
 
@@ -880,6 +958,13 @@ async function fetchResults(isFresh){
       if(state.providers.size){
         results = await filterByProviders(results, mediaType);
       }
+    }
+
+    // Rom-Com's "cut" direction can't be expressed as an API param (without_genres would drop
+    // anything with EITHER genre, not just items that are both) — so check it client-side always.
+    if(customState.exclude.has('romcom')){
+      const romcomCat = CUSTOM_CATEGORIES.find(c=>c.key==='romcom');
+      results = results.filter(m => !itemMatchesGenrePair(m, romcomCat));
     }
 
     // never show titles already marked watched, regardless of how we got the results
@@ -973,7 +1058,8 @@ function renderResults(totalResults){
   if(state.minRating!==null) parts.push(`rating ≥ ${state.minRating}`);
   if(state.englishOnly) parts.push(`english only`);
   if(state.providers.size) parts.push(`streaming: ${[...state.providers].join(', ')}`);
-  document.getElementById('statusText').textContent = parts.join('  —  ');
+  if(customState.include.size) parts.push(`requiring: ${[...customState.include].map(k=>CUSTOM_CATEGORIES.find(c=>c.key===k).label).join(', ')}`);
+  if(customState.exclude.size) parts.push(`cut: ${[...customState.exclude].map(k=>CUSTOM_CATEGORIES.find(c=>c.key===k).label).join(', ')}`);
   status.textContent = parts.join('  —  ');
 
   document.getElementById('loadMoreWrap').style.display = (page < totalPages && currentResults.length > 0) ? 'flex' : 'none';
